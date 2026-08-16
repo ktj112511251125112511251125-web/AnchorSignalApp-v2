@@ -14,67 +14,57 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download UPRO JSON
-        run: |
-          curl -L \
-            https://raw.githubusercontent.com/ktj112511251125112511251125-web/UPRO-anchor-dashboard/main/upro_latest.json \
-            -o upro_latest.json
-
-      - name: Download DUAL JSON
-        run: |
-          curl -L \
-            -H "Accept: application/vnd.github.raw+json" \
-            -H "Authorization: Bearer ${{ secrets.DUAL_REPO_TOKEN }}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/ktj112511251125112511251125-web/dual-anchor-dashboard/contents/dual_latest.json \
-            -o dual_latest.json
-
-      - name: Merge JSON files
+      - name: Merge latest JSON
+        env:
+          UPRO_JSON_URL: https://raw.githubusercontent.com/ktj112511251125112511251125-web/UPRO-anchor-dashboard/main/upro_latest.json
+          DUAL_REPO_TOKEN: ${{ secrets.DUAL_REPO_TOKEN }}
         run: |
           mkdir -p app_data
-          python - <<'PY'
+
+          curl -L \
+            -H "Accept: application/vnd.github.raw+json" \
+            -H "Authorization: Bearer $DUAL_REPO_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/ktj112511251125112511251125-web/dual-anchor-dashboard/contents/dual_latest.json \
+            -o /tmp/dual_latest.json
+
+          curl -L \
+            "$UPRO_JSON_URL" \
+            -o /tmp/upro_latest.json
+
+          python -c '
           import json
-          from datetime import datetime
           from pathlib import Path
+          from datetime import datetime
 
-          with open("upro_latest.json", "r", encoding="utf-8") as f:
-              upro = json.load(f)
+          upro = json.load(open("/tmp/upro_latest.json", encoding="utf-8"))
+          dual = json.load(open("/tmp/dual_latest.json", encoding="utf-8"))
 
-          with open("dual_latest.json", "r", encoding="utf-8") as f:
-              dual = json.load(f)
-
-          assets = []
-          assets.extend(upro.get("assets", []))
-          assets.extend(dual.get("assets", []))
-
-          order = {"UPRO": 0, "QLD": 1, "TQQQ": 2}
-          assets.sort(
-              key=lambda x: order.get(str(x.get("symbol", "")), 99)
-          )
+          assets = upro.get("assets", []) + dual.get("assets", [])
 
           if not assets:
-              raise RuntimeError("No assets found")
+              raise RuntimeError("No assets found in source JSON files")
+
+          order = {"UPRO": 0, "QLD": 1, "TQQQ": 2}
+          assets.sort(key=lambda x: order.get(str(x.get("symbol", "")), 99))
 
           payload = {
-              "updated_at": datetime.now().astimezone().strftime(
-                  "%Y-%m-%d %H:%M %Z"
-              ),
+              "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z"),
               "market_label": "Anchor 실제 전략 신호",
               "market_detail": "UPRO + QLD/TQQQ GitHub Actions 결과 자동 병합",
               "assets": assets
           }
 
-          out = Path("app_data/latest.json")
-          out.parent.mkdir(parents=True, exist_ok=True)
-          out.write_text(
+          Path("app_data").mkdir(exist_ok=True)
+          Path("app_data/latest.json").write_text(
               json.dumps(payload, ensure_ascii=False, indent=2),
               encoding="utf-8"
           )
 
-          print(f"wrote {out} ({len(assets)} assets)")
-          PY
+          print("latest.json created:", len(assets), "assets")
+          '
 
-      - name: Commit merged latest.json
+      - name: Commit latest.json
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
