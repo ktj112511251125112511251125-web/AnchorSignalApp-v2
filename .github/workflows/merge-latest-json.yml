@@ -1,9 +1,7 @@
-name: Merge Anchor latest.json
+name: Merge latest JSON
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 10 * * 1-5"
 
 permissions:
   contents: write
@@ -11,24 +9,38 @@ permissions:
 jobs:
   merge:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Merge UPRO + DUAL JSON
-        env:
-          UPRO_JSON_URL: ${{ vars.UPRO_JSON_URL }}
-          DUAL_JSON_URL: ${{ vars.DUAL_JSON_URL }}
-        run: python scripts/merge_latest.py
-      - name: Commit latest.json when changed
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download UPRO JSON
+        run: |
+          curl -L \
+            https://raw.githubusercontent.com/ktj112511251125112511251125-web/UPRO-anchor-dashboard/main/upro_latest.json \
+            -o upro_latest.json
+
+      - name: Download DUAL JSON
+        run: |
+          curl -L \
+            -H "Accept: application/vnd.github.raw+json" \
+            -H "Authorization: Bearer ${{ secrets.DUAL_REPO_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/ktj112511251125112511251125-web/dual-anchor-dashboard/contents/dual_latest.json \
+            -o dual_latest.json
+
+      - name: Merge JSON files
+        run: |
+          mkdir -p app_data
+          python scripts/merge_latest.py \
+            --upro upro_latest.json \
+            --dual dual_latest.json \
+            --output app_data/latest.json
+
+      - name: Commit merged latest.json
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app_data/latest.json
-          if git diff --cached --quiet; then
-            echo "No JSON change"
-          else
-            git commit -m "chore: update Anchor latest.json"
-            git push
-          fi
+          git diff --cached --quiet || git commit -m "chore: update latest.json"
+          git push
