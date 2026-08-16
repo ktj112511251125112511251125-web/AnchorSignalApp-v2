@@ -2,128 +2,96 @@ name: Merge latest JSON
 
 on:
   workflow_dispatch:
+  repository_dispatch:
+    types: [anchor-source-updated]
 
 permissions:
   contents: write
+
+concurrency:
+  group: anchor-latest-merge
+  cancel-in-progress: false
 
 jobs:
   merge:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout AnchorSignalApp
         uses: actions/checkout@v4
 
-      - name: Download source JSON files
+      - name: Download latest source JSON files
         env:
-          REPO_TOKEN: ${{ secrets.DUAL_REPO_TOKEN }}
+          SOURCE_REPO_TOKEN: ${{ secrets.DUAL_REPO_TOKEN }}
         run: |
-          mkdir -p /tmp/anchor-json
+          set -euo pipefail
+          mkdir -p /tmp/anchor-json app_data
 
-          curl --fail -L \
+          curl --fail --silent --show-error -L \
             -H "Accept: application/vnd.github.raw+json" \
-            -H "Authorization: Bearer $REPO_TOKEN" \
+            -H "Authorization: Bearer $SOURCE_REPO_TOKEN" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             https://api.github.com/repos/ktj112511251125112511251125-web/UPRO-anchor-dashboard/contents/upro_latest.json \
             -o /tmp/anchor-json/upro_latest.json
 
-          curl --fail -L \
+          curl --fail --silent --show-error -L \
             -H "Accept: application/vnd.github.raw+json" \
-            -H "Authorization: Bearer $REPO_TOKEN" \
+            -H "Authorization: Bearer $SOURCE_REPO_TOKEN" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             https://api.github.com/repos/ktj112511251125112511251125-web/dual-anchor-dashboard/contents/dual_latest.json \
             -o /tmp/anchor-json/dual_latest.json
 
-          echo "UPRO bytes:"
-          wc -c /tmp/anchor-json/upro_latest.json
+          python -m json.tool /tmp/anchor-json/upro_latest.json >/dev/null
+          python -m json.tool /tmp/anchor-json/dual_latest.json >/dev/null
 
-          echo "DUAL bytes:"
-          wc -c /tmp/anchor-json/dual_latest.json
-
-      - name: Merge latest JSON
+      - name: Merge UPRO + QLD + TQQQ
         run: |
-          mkdir -p app_data
-
           python - <<'PY'
           import json
-          from pathlib import Path
           from datetime import datetime, timezone
+          from pathlib import Path
 
-          upro_path = Path("/tmp/anchor-json/upro_latest.json")
-          dual_path = Path("/tmp/anchor-json/dual_latest.json")
-
-          with upro_path.open("r", encoding="utf-8") as f:
+          with open('/tmp/anchor-json/upro_latest.json', encoding='utf-8') as f:
               upro = json.load(f)
-
-          with dual_path.open("r", encoding="utf-8") as f:
+          with open('/tmp/anchor-json/dual_latest.json', encoding='utf-8') as f:
               dual = json.load(f)
 
           assets = []
+          for source in (upro, dual):
+              if isinstance(source, dict) and isinstance(source.get('assets'), list):
+                  assets.extend(source['assets'])
+              elif isinstance(source, dict) and (source.get('symbol') or source.get('ticker')):
+                  assets.append(source)
 
-          if isinstance(upro, dict):
-              if isinstance(upro.get("assets"), list):
-                  assets.extend(upro["assets"])
-              elif upro.get("symbol") or upro.get("ticker"):
-                  assets.append(upro)
-
-          if isinstance(dual, dict):
-              if isinstance(dual.get("assets"), list):
-                  assets.extend(dual["assets"])
-              elif dual.get("symbol") or dual.get("ticker"):
-                  assets.append(dual)
+          order = {'UPRO': 0, 'QLD': 1, 'TQQQ': 2}
+          def symbol(item):
+              return str(item.get('symbol') or item.get('ticker') or '').upper()
+          assets.sort(key=lambda item: order.get(symbol(item), 99))
 
           if not assets:
-              raise RuntimeError("No assets found in UPRO/DUAL JSON")
-
-          def symbol_of(item):
-              return str(
-                  item.get("symbol")
-                  or item.get("ticker")
-                  or ""
-              ).upper()
-
-          order = {
-              "UPRO": 0,
-              "QLD": 1,
-              "TQQQ": 2
-          }
-
-          assets.sort(
-              key=lambda item: order.get(symbol_of(item), 99)
-          )
+              raise RuntimeError('No assets found in source JSON files')
 
           payload = {
-              "updated_at": datetime.now(timezone.utc).isoformat(),
-              "market_label": "Anchor 실제 전략 신호",
-              "market_detail": "UPRO + QLD/TQQQ 자동 병합",
-              "assets": assets
+              'updated_at': datetime.now(timezone.utc).isoformat(),
+              'market_label': 'Anchor 실제 전략 신호',
+              'market_detail': 'UPRO + QLD/TQQQ 자동 병합',
+              'assets': assets,
           }
 
-          out = Path("app_data/latest.json")
-
-          out.write_text(
-              json.dumps(
-                  payload,
-                  ensure_ascii=False,
-                  indent=2
-              ),
-              encoding="utf-8"
-          )
-
-          print("Created:", out)
-          print("Asset count:", len(assets))
-          print("Symbols:", [symbol_of(x) for x in assets])
+          out = Path('app_data/latest.json')
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+          print('Created:', out)
+          print('Symbols:', [symbol(x) for x in assets])
           PY
 
-      - name: Commit latest.json
+      - name: Commit latest.json when changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add app_data/latest.json
-
           if git diff --cached --quiet; then
-            echo "No JSON changes"
+            echo "No JSON change"
           else
             git commit -m "chore: update latest.json"
             git push
