@@ -14,60 +14,117 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Merge latest JSON
+      - name: Download source JSON files
         env:
-          UPRO_JSON_URL: https://raw.githubusercontent.com/ktj112511251125112511251125-web/UPRO-anchor-dashboard/main/upro_latest.json
-          DUAL_REPO_TOKEN: ${{ secrets.DUAL_REPO_TOKEN }}
+          REPO_TOKEN: ${{ secrets.DUAL_REPO_TOKEN }}
+        run: |
+          mkdir -p /tmp/anchor-json
+
+          curl --fail -L \
+            -H "Accept: application/vnd.github.raw+json" \
+            -H "Authorization: Bearer $REPO_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/ktj112511251125112511251125-web/UPRO-anchor-dashboard/contents/upro_latest.json \
+            -o /tmp/anchor-json/upro_latest.json
+
+          curl --fail -L \
+            -H "Accept: application/vnd.github.raw+json" \
+            -H "Authorization: Bearer $REPO_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/ktj112511251125112511251125-web/dual-anchor-dashboard/contents/dual_latest.json \
+            -o /tmp/anchor-json/dual_latest.json
+
+          echo "UPRO bytes:"
+          wc -c /tmp/anchor-json/upro_latest.json
+
+          echo "DUAL bytes:"
+          wc -c /tmp/anchor-json/dual_latest.json
+
+      - name: Merge latest JSON
         run: |
           mkdir -p app_data
 
-          curl -L \
-            -H "Accept: application/vnd.github.raw+json" \
-            -H "Authorization: Bearer $DUAL_REPO_TOKEN" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/ktj112511251125112511251125-web/dual-anchor-dashboard/contents/dual_latest.json \
-            -o /tmp/dual_latest.json
-
-          curl -L \
-            "$UPRO_JSON_URL" \
-            -o /tmp/upro_latest.json
-
-          python -c '
+          python - <<'PY'
           import json
           from pathlib import Path
-          from datetime import datetime
+          from datetime import datetime, timezone
 
-          upro = json.load(open("/tmp/upro_latest.json", encoding="utf-8"))
-          dual = json.load(open("/tmp/dual_latest.json", encoding="utf-8"))
+          upro_path = Path("/tmp/anchor-json/upro_latest.json")
+          dual_path = Path("/tmp/anchor-json/dual_latest.json")
 
-          assets = upro.get("assets", []) + dual.get("assets", [])
+          with upro_path.open("r", encoding="utf-8") as f:
+              upro = json.load(f)
+
+          with dual_path.open("r", encoding="utf-8") as f:
+              dual = json.load(f)
+
+          assets = []
+
+          if isinstance(upro, dict):
+              if isinstance(upro.get("assets"), list):
+                  assets.extend(upro["assets"])
+              elif upro.get("symbol") or upro.get("ticker"):
+                  assets.append(upro)
+
+          if isinstance(dual, dict):
+              if isinstance(dual.get("assets"), list):
+                  assets.extend(dual["assets"])
+              elif dual.get("symbol") or dual.get("ticker"):
+                  assets.append(dual)
 
           if not assets:
-              raise RuntimeError("No assets found in source JSON files")
+              raise RuntimeError("No assets found in UPRO/DUAL JSON")
 
-          order = {"UPRO": 0, "QLD": 1, "TQQQ": 2}
-          assets.sort(key=lambda x: order.get(str(x.get("symbol", "")), 99))
+          def symbol_of(item):
+              return str(
+                  item.get("symbol")
+                  or item.get("ticker")
+                  or ""
+              ).upper()
+
+          order = {
+              "UPRO": 0,
+              "QLD": 1,
+              "TQQQ": 2
+          }
+
+          assets.sort(
+              key=lambda item: order.get(symbol_of(item), 99)
+          )
 
           payload = {
-              "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z"),
+              "updated_at": datetime.now(timezone.utc).isoformat(),
               "market_label": "Anchor 실제 전략 신호",
-              "market_detail": "UPRO + QLD/TQQQ GitHub Actions 결과 자동 병합",
+              "market_detail": "UPRO + QLD/TQQQ 자동 병합",
               "assets": assets
           }
 
-          Path("app_data").mkdir(exist_ok=True)
-          Path("app_data/latest.json").write_text(
-              json.dumps(payload, ensure_ascii=False, indent=2),
+          out = Path("app_data/latest.json")
+
+          out.write_text(
+              json.dumps(
+                  payload,
+                  ensure_ascii=False,
+                  indent=2
+              ),
               encoding="utf-8"
           )
 
-          print("latest.json created:", len(assets), "assets")
-          '
+          print("Created:", out)
+          print("Asset count:", len(assets))
+          print("Symbols:", [symbol_of(x) for x in assets])
+          PY
 
       - name: Commit latest.json
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add app_data/latest.json
-          git diff --cached --quiet || git commit -m "chore: update latest.json"
-          git push
+
+          if git diff --cached --quiet; then
+            echo "No JSON changes"
+          else
+            git commit -m "chore: update latest.json"
+            git push
+          fi
