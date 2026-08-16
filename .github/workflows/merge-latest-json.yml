@@ -30,13 +30,45 @@ jobs:
             -o dual_latest.json
 
       - name: Merge JSON files
-        run: |
-          mkdir -p app_data
-          python scripts/merge_latest.py \
-            --upro upro_latest.json \
-            --dual dual_latest.json \
-            --output app_data/latest.json
+  run: |
+    mkdir -p app_data
+    python - <<'PY'
+    import json
+    from datetime import datetime
+    from pathlib import Path
 
+    with open("upro_latest.json", "r", encoding="utf-8") as f:
+        upro = json.load(f)
+
+    with open("dual_latest.json", "r", encoding="utf-8") as f:
+        dual = json.load(f)
+
+    assets = []
+    assets.extend(upro.get("assets", []))
+    assets.extend(dual.get("assets", []))
+
+    order = {"UPRO": 0, "QLD": 1, "TQQQ": 2}
+    assets.sort(key=lambda x: order.get(str(x.get("symbol", "")), 99))
+
+    if not assets:
+        raise RuntimeError("No assets found")
+
+    payload = {
+        "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z"),
+        "market_label": "Anchor 실제 전략 신호",
+        "market_detail": "UPRO + QLD/TQQQ GitHub Actions 결과 자동 병합",
+        "assets": assets
+    }
+
+    out = Path("app_data/latest.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+
+    print(f"wrote {out} ({len(assets)} assets)")
+    PY
       - name: Commit merged latest.json
         run: |
           git config user.name "github-actions[bot]"
