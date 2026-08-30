@@ -1,7 +1,50 @@
 {
-  "updated_at": "2026-08-28T14:36:52.713944+00:00",
+  "updated_at": "2026-08-30 13:34 UTC",
   "market_label": "Anchor 실제 전략 신호",
-  "market_detail": "UPRO + QLD/TQQQ 자동 병합",
+  "market_detail": "UPRO + QLD/TQQQ + QQQ/VOO 밸류에이션 자동 병합",
+  "rates": {
+    "fed_funds_lower": null,
+    "fed_funds_upper": null,
+    "fed_funds_as_of": null,
+    "us10y": null,
+    "us10y_as_of": null,
+    "as_of": "2026-08-30",
+    "source": "FRED",
+    "warning": "FRED fetch failed: 'utf-8' codec can't decode byte 0x8a in position 18: invalid start byte",
+    "valuation_warning": "quote endpoint: HTTP Error 401: Unauthorized; QQQ summary endpoint: HTTP Error 401: Unauthorized; VOO summary endpoint: HTTP Error 401: Unauthorized"
+  },
+  "valuation": {
+    "qqq": {
+      "forward_pe": null,
+      "forward_pe_as_of": null,
+      "earnings_yield": null,
+      "earnings_yield_as_of": null,
+      "spread_vs_10y": null,
+      "spread_as_of": null,
+      "bond_signal": "데이터 없음",
+      "forward_pe_source": "Unavailable",
+      "zscore_5y": null,
+      "history_points": 0,
+      "history_ready": false,
+      "history_signal": "데이터 축적중",
+      "zscore_as_of": "2026-08-30"
+    },
+    "voo": {
+      "forward_pe": null,
+      "forward_pe_as_of": null,
+      "earnings_yield": null,
+      "earnings_yield_as_of": null,
+      "spread_vs_10y": null,
+      "spread_as_of": null,
+      "bond_signal": "데이터 없음",
+      "forward_pe_source": "Unavailable",
+      "zscore_5y": null,
+      "history_points": 0,
+      "history_ready": false,
+      "history_signal": "데이터 축적중",
+      "zscore_as_of": "2026-08-30"
+    }
+  },
   "assets": [
     {
       "symbol": "UPRO",
