@@ -5,7 +5,11 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from valuation_data import build_valuation
+try:
+    from valuation_data import build_valuation
+except Exception as exc:
+    build_valuation = None
+    print(f"valuation module unavailable: {exc}")
 
 UPRO_URL = os.environ.get("UPRO_JSON_URL", "").strip()
 DUAL_URL = os.environ.get("DUAL_JSON_URL", "").strip()
@@ -301,9 +305,7 @@ def main():
     previous_valuation = None
     if OUT.exists():
         try:
-            previous_payload = json.loads(OUT.read_text(encoding="utf-8"))
-            previous_market = previous_payload.get("market_info")
-            previous_valuation = previous_payload.get("valuation_snapshot")
+            previous_market = json.loads(OUT.read_text(encoding="utf-8")).get("market_info")
         except Exception:
             pass
 
@@ -334,9 +336,20 @@ def main():
     if market_info:
         payload["market_info"] = market_info
 
-    valuation_snapshot = build_valuation(previous_valuation)
-    if valuation_snapshot:
-        payload["valuation_snapshot"] = valuation_snapshot
+    # Valuation is optional by design. A temporary external-data failure must never
+    # break the original Anchor strategy merge. If the new fetch fails entirely,
+    # retain the last good snapshot when one exists.
+    if build_valuation is not None:
+        try:
+            valuation_snapshot = build_valuation(previous_valuation)
+            if valuation_snapshot:
+                payload["valuation_snapshot"] = valuation_snapshot
+            elif previous_valuation:
+                payload["valuation_snapshot"] = previous_valuation
+        except Exception as exc:
+            print(f"valuation build failed (strategy merge continues): {exc}")
+            if previous_valuation:
+                payload["valuation_snapshot"] = previous_valuation
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
