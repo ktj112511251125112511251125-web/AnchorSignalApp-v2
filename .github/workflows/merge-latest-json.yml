@@ -26,7 +26,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install valuation data dependencies
-        run: python -m pip install --upgrade yfinance requests
+        run: python -m pip install --disable-pip-version-check yfinance requests
 
       - name: Download latest source JSON files
         env:
@@ -58,18 +58,24 @@ jobs:
           DUAL_JSON_FILE: /tmp/anchor-json/dual_latest.json
           LATEST_JSON_PATH: app_data/latest.json
           VALUATION_HISTORY_PATH: app_data/valuation_history.json
-          # Optional manual fallbacks. Yahoo/FRED are attempted first when these are blank.
           QQQ_FORWARD_PE: ${{ vars.QQQ_FORWARD_PE }}
           QQQ_FORWARD_PE_AS_OF: ${{ vars.QQQ_FORWARD_PE_AS_OF }}
           VOO_FORWARD_PE: ${{ vars.VOO_FORWARD_PE }}
           VOO_FORWARD_PE_AS_OF: ${{ vars.VOO_FORWARD_PE_AS_OF }}
+          US10Y: ${{ vars.US10Y }}
+          US10Y_AS_OF: ${{ vars.US10Y_AS_OF }}
+          FED_FUNDS_LOWER: ${{ vars.FED_FUNDS_LOWER }}
+          FED_FUNDS_LOWER_AS_OF: ${{ vars.FED_FUNDS_LOWER_AS_OF }}
+          FED_FUNDS_UPPER: ${{ vars.FED_FUNDS_UPPER }}
+          FED_FUNDS_UPPER_AS_OF: ${{ vars.FED_FUNDS_UPPER_AS_OF }}
         run: python scripts/merge_latest.py
 
       - name: Commit latest.json when changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app_data/latest.json app_data/valuation_history.json
+          git add app_data/latest.json
+          if [ -f app_data/valuation_history.json ]; then git add app_data/valuation_history.json; fi
           if git diff --cached --quiet; then
             echo "No JSON change"
           else
