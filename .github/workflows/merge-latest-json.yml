@@ -20,14 +20,6 @@ jobs:
       - name: Checkout AnchorSignalApp
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install valuation data dependencies
-        run: python -m pip install --disable-pip-version-check yfinance requests
-
       - name: Download latest source JSON files
         env:
           SOURCE_REPO_TOKEN: ${{ secrets.DUAL_REPO_TOKEN }}
@@ -52,30 +44,52 @@ jobs:
           python -m json.tool /tmp/anchor-json/upro_latest.json >/dev/null
           python -m json.tool /tmp/anchor-json/dual_latest.json >/dev/null
 
-      - name: Merge + enrich strategy conditions
-        env:
-          UPRO_JSON_FILE: /tmp/anchor-json/upro_latest.json
-          DUAL_JSON_FILE: /tmp/anchor-json/dual_latest.json
-          LATEST_JSON_PATH: app_data/latest.json
-          VALUATION_HISTORY_PATH: app_data/valuation_history.json
-          QQQ_FORWARD_PE: ${{ vars.QQQ_FORWARD_PE }}
-          QQQ_FORWARD_PE_AS_OF: ${{ vars.QQQ_FORWARD_PE_AS_OF }}
-          VOO_FORWARD_PE: ${{ vars.VOO_FORWARD_PE }}
-          VOO_FORWARD_PE_AS_OF: ${{ vars.VOO_FORWARD_PE_AS_OF }}
-          US10Y: ${{ vars.US10Y }}
-          US10Y_AS_OF: ${{ vars.US10Y_AS_OF }}
-          FED_FUNDS_LOWER: ${{ vars.FED_FUNDS_LOWER }}
-          FED_FUNDS_LOWER_AS_OF: ${{ vars.FED_FUNDS_LOWER_AS_OF }}
-          FED_FUNDS_UPPER: ${{ vars.FED_FUNDS_UPPER }}
-          FED_FUNDS_UPPER_AS_OF: ${{ vars.FED_FUNDS_UPPER_AS_OF }}
-        run: python scripts/merge_latest.py
+      - name: Merge UPRO + QLD + TQQQ
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          with open('/tmp/anchor-json/upro_latest.json', encoding='utf-8') as f:
+              upro = json.load(f)
+          with open('/tmp/anchor-json/dual_latest.json', encoding='utf-8') as f:
+              dual = json.load(f)
+
+          assets = []
+          for source in (upro, dual):
+              if isinstance(source, dict) and isinstance(source.get('assets'), list):
+                  assets.extend(source['assets'])
+              elif isinstance(source, dict) and (source.get('symbol') or source.get('ticker')):
+                  assets.append(source)
+
+          order = {'UPRO': 0, 'QLD': 1, 'TQQQ': 2}
+          def symbol(item):
+              return str(item.get('symbol') or item.get('ticker') or '').upper()
+          assets.sort(key=lambda item: order.get(symbol(item), 99))
+
+          if not assets:
+              raise RuntimeError('No assets found in source JSON files')
+
+          payload = {
+              'updated_at': datetime.now(timezone.utc).isoformat(),
+              'market_label': 'Anchor 실제 전략 신호',
+              'market_detail': 'UPRO + QLD/TQQQ 자동 병합',
+              'assets': assets,
+          }
+
+          out = Path('app_data/latest.json')
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+          print('Created:', out)
+          print('Symbols:', [symbol(x) for x in assets])
+          PY
 
       - name: Commit latest.json when changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app_data/latest.json
-          if [ -f app_data/valuation_history.json ]; then git add app_data/valuation_history.json; fi
           if git diff --cached --quiet; then
             echo "No JSON change"
           else
